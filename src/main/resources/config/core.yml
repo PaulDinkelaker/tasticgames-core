@@ -1,0 +1,5 @@
+server:
+  name: "lobby"
+
+presence:
+  managed-by-proxy: true

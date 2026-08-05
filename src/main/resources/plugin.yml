@@ -1,0 +1,18 @@
+name: TasticCore
+version: ${version}
+main: de.tasticgames.TasticCorePlugin
+api-version: '1.21'
+authors:
+  - PaulDinkelaker
+description: Core platform plugin for the TasticGames network.
+website: https://tasticgames.de
+commands:
+  tasticcore:
+    description: "Technical diagnostics for TasticCore"
+    usage: "/tasticcore player <name>"
+    permission: "tasticcore.admin"
+
+permissions:
+  tasticcore.admin:
+    description: "Allows access to TasticCore diagnostics"
+    default: op

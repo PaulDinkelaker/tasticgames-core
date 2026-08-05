@@ -1,0 +1,490 @@
+package de.tasticgames.settings.internal;
+
+import de.tasticgames.api.ApiClient;
+import de.tasticgames.api.PlayerSetting;
+import de.tasticgames.api.PlayerSettingType;
+import de.tasticgames.api.PlayerSettingUpdate;
+import de.tasticgames.api.PlayerSettingsSnapshot;
+import de.tasticgames.player.PlayerManager;
+import de.tasticgames.player.PlayerState;
+import de.tasticgames.player.TasticPlayer;
+import de.tasticgames.settings.CoreSettings;
+import de.tasticgames.settings.PlayerSettings;
+import de.tasticgames.settings.PlayerSettingsService;
+import de.tasticgames.settings.SettingKey;
+import de.tasticgames.settings.SettingRegistry;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
+public final class DefaultPlayerSettingsService
+        implements PlayerSettingsService {
+
+    private final PlayerManager playerManager;
+    private final SettingRegistry settingRegistry;
+    private final ApiClient apiClient;
+
+    public DefaultPlayerSettingsService(
+            PlayerManager playerManager,
+            SettingRegistry settingRegistry,
+            ApiClient apiClient
+    ) {
+        this.playerManager = Objects.requireNonNull(
+                playerManager,
+                "playerManager"
+        );
+
+        this.settingRegistry = Objects.requireNonNull(
+                settingRegistry,
+                "settingRegistry"
+        );
+
+        this.apiClient = Objects.requireNonNull(
+                apiClient,
+                "apiClient"
+        );
+    }
+
+    @Override
+    public String id() {
+        return "player-settings-service";
+    }
+
+    @Override
+    public void start() {
+        if (settingRegistry.size() == 0) {
+            throw new IllegalStateException(
+                    "Cannot start PlayerSettingsService because no settings are registered."
+            );
+        }
+    }
+
+    @Override
+    public void stop() {
+        try {
+            flushAll().join();
+        } catch (Exception exception) {
+            throw new IllegalStateException(
+                    "Failed to flush player settings during shutdown.",
+                    exception
+            );
+        }
+    }
+
+    @Override
+    public <T> T get(
+            TasticPlayer player,
+            SettingKey<T> key
+    ) {
+        Objects.requireNonNull(
+                player,
+                "player"
+        );
+
+        Objects.requireNonNull(
+                key,
+                "key"
+        );
+
+        requireReady(
+                player
+        );
+
+        return player.settings()
+                .get(key);
+    }
+
+    @Override
+    public <T> void set(
+            TasticPlayer player,
+            SettingKey<T> key,
+            T value
+    ) {
+        Objects.requireNonNull(
+                player,
+                "player"
+        );
+
+        Objects.requireNonNull(
+                key,
+                "key"
+        );
+
+        requireReady(
+                player
+        );
+
+        player.settings()
+                .set(
+                        key,
+                        value
+                );
+    }
+
+    @Override
+    public void reset(
+            TasticPlayer player,
+            SettingKey<?> key
+    ) {
+        Objects.requireNonNull(
+                player,
+                "player"
+        );
+
+        Objects.requireNonNull(
+                key,
+                "key"
+        );
+
+        requireReady(
+                player
+        );
+
+        player.settings()
+                .reset(key);
+    }
+
+    @Override
+    public void resetAll(
+            TasticPlayer player
+    ) {
+        Objects.requireNonNull(
+                player,
+                "player"
+        );
+
+        requireReady(
+                player
+        );
+
+        player.settings()
+                .resetAll();
+    }
+
+    @Override
+    public Map<String, Object> snapshot(
+            TasticPlayer player
+    ) {
+        Objects.requireNonNull(
+                player,
+                "player"
+        );
+
+        requireReady(
+                player
+        );
+
+        return player.settings()
+                .snapshot();
+    }
+
+    @Override
+    public CompletableFuture<Void> load(
+            UUID minecraftUuid
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        TasticPlayer player =
+                playerManager.requireLoaded(
+                        minecraftUuid
+                );
+
+        return apiClient
+                .getSettings(
+                        minecraftUuid
+                )
+                .thenAccept(snapshot ->
+                        applySnapshot(
+                                player,
+                                snapshot
+                        )
+                );
+    }
+
+    @Override
+    public CompletableFuture<Void> flush(
+            UUID minecraftUuid
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        return playerManager
+                .find(minecraftUuid)
+                .map(this::flushPlayer)
+                .orElseGet(
+                        () ->
+                                CompletableFuture.completedFuture(
+                                        null
+                                )
+                );
+    }
+
+    @Override
+    public CompletableFuture<Void> flushAll() {
+        List<CompletableFuture<Void>> operations =
+                new ArrayList<>();
+
+        for (TasticPlayer player
+                : playerManager.onlinePlayers()) {
+            operations.add(
+                    flushPlayer(
+                            player
+                    )
+            );
+        }
+
+        return CompletableFuture.allOf(
+                operations.toArray(
+                        CompletableFuture[]::new
+                )
+        );
+    }
+
+    private CompletableFuture<Void> flushPlayer(
+            TasticPlayer player
+    ) {
+        Objects.requireNonNull(
+                player,
+                "player"
+        );
+
+        if (player.state() == PlayerState.FAILED) {
+            return CompletableFuture.completedFuture(
+                    null
+            );
+        }
+
+        PlayerSettings settings =
+                player.settings();
+
+        if (!settings.dirty()) {
+            return CompletableFuture.completedFuture(
+                    null
+            );
+        }
+
+        List<PlayerSettingUpdate> updates =
+                createUpdates(
+                        settings.snapshot()
+                );
+
+        return apiClient
+                .replaceSettings(
+                        player.minecraftUuid(),
+                        updates
+                )
+                .thenAccept(snapshot -> {
+                    validateSavedSnapshot(
+                            player,
+                            snapshot
+                    );
+
+                    settings.markClean();
+                });
+    }
+
+    private void validateSavedSnapshot(
+            TasticPlayer player,
+            PlayerSettingsSnapshot snapshot
+    ) {
+        Objects.requireNonNull(
+                player,
+                "player"
+        );
+
+        Objects.requireNonNull(
+                snapshot,
+                "snapshot"
+        );
+
+        if (!player.minecraftUuid()
+                .equals(snapshot.minecraftUuid())) {
+            throw new IllegalStateException(
+                    "Saved settings snapshot UUID does not match player UUID. "
+                            + "Expected "
+                            + player.minecraftUuid()
+                            + " but received "
+                            + snapshot.minecraftUuid()
+            );
+        }
+
+        if (player.accountId()
+                != snapshot.accountId()) {
+            throw new IllegalStateException(
+                    "Saved settings snapshot account ID does not match player account. "
+                            + "Expected "
+                            + player.accountId()
+                            + " but received "
+                            + snapshot.accountId()
+            );
+        }
+    }
+
+    private List<PlayerSettingUpdate> createUpdates(
+            Map<String, Object> snapshot
+    ) {
+        Objects.requireNonNull(
+                snapshot,
+                "snapshot"
+        );
+
+        List<PlayerSettingUpdate> updates =
+                new ArrayList<>(
+                        snapshot.size()
+                );
+
+        for (Map.Entry<String, Object> entry
+                : snapshot.entrySet()) {
+            String settingId =
+                    entry.getKey();
+
+            if (settingId.equals(
+                    CoreSettings.LANGUAGE.id()
+            )) {
+                continue;
+            }
+
+            SettingKey<?> key =
+                    settingRegistry.require(
+                            settingId
+                    );
+
+            Object validatedValue =
+                    key.validate(
+                            entry.getValue()
+                    );
+
+            updates.add(
+                    new PlayerSettingUpdate(
+                            key.id(),
+                            validatedValue,
+                            determineType(
+                                    key
+                            )
+                    )
+            );
+        }
+
+        return List.copyOf(
+                updates
+        );
+    }
+
+    private PlayerSettingType determineType(
+            SettingKey<?> key
+    ) {
+        Objects.requireNonNull(
+                key,
+                "key"
+        );
+
+        if (key.type() == Boolean.class) {
+            return PlayerSettingType.BOOLEAN;
+        }
+
+        if (key.type() == Integer.class) {
+            return PlayerSettingType.INTEGER;
+        }
+
+        if (key.type() == String.class) {
+            return PlayerSettingType.STRING;
+        }
+
+        throw new IllegalArgumentException(
+                "Unsupported setting type for '"
+                        + key.id()
+                        + "': "
+                        + key.type().getName()
+        );
+    }
+
+    private void applySnapshot(
+            TasticPlayer player,
+            PlayerSettingsSnapshot snapshot
+    ) {
+        Objects.requireNonNull(
+                player,
+                "player"
+        );
+
+        Objects.requireNonNull(
+                snapshot,
+                "snapshot"
+        );
+
+        if (!player.minecraftUuid()
+                .equals(snapshot.minecraftUuid())) {
+            throw new IllegalStateException(
+                    "Settings snapshot UUID does not match player UUID. "
+                            + "Expected "
+                            + player.minecraftUuid()
+                            + " but received "
+                            + snapshot.minecraftUuid()
+            );
+        }
+
+        if (player.accountId()
+                != snapshot.accountId()) {
+            throw new IllegalStateException(
+                    "Settings snapshot account ID does not match player account. "
+                            + "Expected "
+                            + player.accountId()
+                            + " but received "
+                            + snapshot.accountId()
+            );
+        }
+
+        Map<String, Object> persistedValues =
+                snapshot.settings()
+                        .stream()
+                        .collect(
+                                Collectors.toUnmodifiableMap(
+                                        PlayerSetting::key,
+                                        PlayerSetting::value,
+                                        (first, second) -> {
+                                            throw new IllegalStateException(
+                                                    "Duplicate setting returned by API."
+                                            );
+                                        }
+                                )
+                        );
+
+        player.settings()
+                .load(
+                        persistedValues
+                );
+
+        player.settings()
+                .set(
+                        CoreSettings.LANGUAGE,
+                        player.language()
+                );
+
+        player.settings()
+                .markClean();
+    }
+
+    private void requireReady(
+            TasticPlayer player
+    ) {
+        if (!player.ready()) {
+            throw new IllegalStateException(
+                    "TasticPlayer is not ready: "
+                            + player.minecraftUuid()
+                            + " [state="
+                            + player.state()
+                            + "]"
+            );
+        }
+    }
+}
