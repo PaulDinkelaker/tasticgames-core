@@ -1,0 +1,11 @@
+enabled: true
+
+base-url: "http://45.81.234.87:8080"
+
+authentication:
+  service-name: "tastic-core-lobby"
+  api-key: "6a13636b26729235a56fcbfeb671c7e440060059e618bff08f2b0b226aab3632"
+
+timeouts:
+  connect-seconds: 5
+  request-seconds: 10
