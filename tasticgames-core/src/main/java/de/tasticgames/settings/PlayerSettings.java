@@ -13,8 +13,15 @@ public interface PlayerSettings {
             T value
     );
 
-    void load(
-            Map<String, Object> persistedValues
+    <T> void setPersisted(
+            SettingKey<T> key,
+            T value
+    );
+
+    <T> long restoreIfCurrent(
+            SettingKey<T> key,
+            T expectedCurrentValue,
+            T previousValue
     );
 
     boolean contains(
@@ -29,7 +36,21 @@ public interface PlayerSettings {
 
     Map<String, Object> snapshot();
 
+    PlayerSettingsState state();
+
+    long revision();
+
     boolean dirty();
 
     void markClean();
+
+    boolean markClean(
+            long expectedRevision
+    );
+
+    void markDirty();
+
+    void load(
+            Map<String, Object> persistedValues
+    );
 }

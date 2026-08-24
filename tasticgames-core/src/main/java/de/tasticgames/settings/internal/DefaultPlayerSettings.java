@@ -1,6 +1,7 @@
 package de.tasticgames.settings.internal;
 
 import de.tasticgames.settings.PlayerSettings;
+import de.tasticgames.settings.PlayerSettingsState;
 import de.tasticgames.settings.SettingKey;
 import de.tasticgames.settings.SettingRegistry;
 
@@ -9,7 +10,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class DefaultPlayerSettings
         implements PlayerSettings {
@@ -19,8 +19,8 @@ public final class DefaultPlayerSettings
     private final ConcurrentMap<String, Object> values =
             new ConcurrentHashMap<>();
 
-    private final AtomicBoolean dirty =
-            new AtomicBoolean(false);
+    private long revision;
+    private long cleanRevision;
 
     public DefaultPlayerSettings(
             SettingRegistry registry
@@ -29,54 +29,152 @@ public final class DefaultPlayerSettings
                 registry,
                 "registry"
         );
+
+        this.revision = 0L;
+        this.cleanRevision = 0L;
     }
 
     @Override
-    public <T> T get(
+    public synchronized <T> T get(
             SettingKey<T> key
     ) {
-        requireRegistered(key);
-
-        Object value = values.get(
-                key.id()
+        requireRegistered(
+                key
         );
+
+        Object value =
+                values.get(
+                        key.id()
+                );
 
         if (value == null) {
             return key.defaultValue();
         }
 
-        return key.validate(value);
+        return key.validate(
+                value
+        );
     }
 
     @Override
-    public <T> void set(
+    public synchronized <T> void set(
             SettingKey<T> key,
             T value
     ) {
-        requireRegistered(key);
+        requireRegistered(
+                key
+        );
 
         T validatedValue =
-                key.validate(value);
-
-        Object previousValue =
-                values.put(
-                        key.id(),
-                        validatedValue
+                key.validate(
+                        value
                 );
 
-        if (!Objects.equals(
+        T previousValue =
+                getEffectiveValue(
+                        key
+                );
+
+        if (Objects.equals(
                 previousValue,
                 validatedValue
         )) {
-            dirty.set(true);
+            return;
         }
+
+        values.put(
+                key.id(),
+                validatedValue
+        );
+
+        incrementRevision();
     }
 
     @Override
-    public boolean contains(
+    public synchronized <T> void setPersisted(
+            SettingKey<T> key,
+            T value
+    ) {
+        requireRegistered(
+                key
+        );
+
+        T validatedValue =
+                key.validate(
+                        value
+                );
+
+        values.put(
+                key.id(),
+                validatedValue
+        );
+    }
+
+    @Override
+    public synchronized <T> long restoreIfCurrent(
+            SettingKey<T> key,
+            T expectedCurrentValue,
+            T previousValue
+    ) {
+        requireRegistered(
+                key
+        );
+
+        T validatedExpectedValue =
+                key.validate(
+                        expectedCurrentValue
+                );
+
+        T validatedPreviousValue =
+                key.validate(
+                        previousValue
+                );
+
+        T currentValue =
+                getEffectiveValue(
+                        key
+                );
+
+        if (!Objects.equals(
+                currentValue,
+                validatedExpectedValue
+        )) {
+            return -1L;
+        }
+
+        if (Objects.equals(
+                currentValue,
+                validatedPreviousValue
+        )) {
+            return revision;
+        }
+
+        if (Objects.equals(
+                validatedPreviousValue,
+                key.defaultValue()
+        )) {
+            values.remove(
+                    key.id()
+            );
+        } else {
+            values.put(
+                    key.id(),
+                    validatedPreviousValue
+            );
+        }
+
+        incrementRevision();
+
+        return revision;
+    }
+
+    @Override
+    public synchronized boolean contains(
             SettingKey<?> key
     ) {
-        requireRegistered(key);
+        requireRegistered(
+                key
+        );
 
         return values.containsKey(
                 key.id()
@@ -84,37 +182,178 @@ public final class DefaultPlayerSettings
     }
 
     @Override
-    public void reset(
+    public synchronized void reset(
             SettingKey<?> key
     ) {
-        requireRegistered(key);
+        requireRegistered(
+                key
+        );
 
-        Object removed =
-                values.remove(
-                        key.id()
+        Object previousValue =
+                getEffectiveValueUntyped(
+                        key
                 );
 
-        if (removed != null) {
-            dirty.set(true);
+        Object defaultValue =
+                key.defaultValue();
+
+        values.remove(
+                key.id()
+        );
+
+        if (!Objects.equals(
+                previousValue,
+                defaultValue
+        )) {
+            incrementRevision();
         }
     }
 
     @Override
-    public void resetAll() {
-        if (values.isEmpty()) {
-            return;
+    public synchronized void resetAll() {
+        boolean changed =
+                false;
+
+        for (SettingKey<?> key
+                : registry.settings()) {
+            Object currentValue =
+                    getEffectiveValueUntyped(
+                            key
+                    );
+
+            if (!Objects.equals(
+                    currentValue,
+                    key.defaultValue()
+            )) {
+                changed =
+                        true;
+
+                break;
+            }
         }
 
         values.clear();
-        dirty.set(true);
+
+        if (changed) {
+            incrementRevision();
+        }
     }
 
     @Override
-    public Map<String, Object> snapshot() {
+    public synchronized Map<String, Object> snapshot() {
+        return createSnapshot();
+    }
+
+    @Override
+    public synchronized PlayerSettingsState state() {
+        return new PlayerSettingsState(
+                createSnapshot(),
+                revision
+        );
+    }
+
+    @Override
+    public synchronized long revision() {
+        return revision;
+    }
+
+    @Override
+    public synchronized boolean dirty() {
+        return revision
+                != cleanRevision;
+    }
+
+    @Override
+    public synchronized void markClean() {
+        cleanRevision =
+                revision;
+    }
+
+    @Override
+    public synchronized boolean markClean(
+            long expectedRevision
+    ) {
+        if (expectedRevision < 0) {
+            throw new IllegalArgumentException(
+                    "expectedRevision must not be negative."
+            );
+        }
+
+        if (revision != expectedRevision) {
+            return false;
+        }
+
+        cleanRevision =
+                expectedRevision;
+
+        return true;
+    }
+
+    @Override
+    public synchronized void markDirty() {
+        if (dirty()) {
+            return;
+        }
+
+        incrementRevision();
+    }
+
+    @Override
+    public synchronized void load(
+            Map<String, Object> persistedValues
+    ) {
+        Objects.requireNonNull(
+                persistedValues,
+                "persistedValues"
+        );
+
+        Map<String, Object> loadedValues =
+                new LinkedHashMap<>();
+
+        persistedValues.forEach(
+                (id, value) -> {
+                    SettingKey<?> key =
+                            registry.find(
+                                    id
+                            ).orElse(
+                                    null
+                            );
+
+                    if (key == null) {
+                        return;
+                    }
+
+                    Object validatedValue =
+                            validateUntyped(
+                                    key,
+                                    value
+                            );
+
+                    loadedValues.put(
+                            key.id(),
+                            validatedValue
+                    );
+                }
+        );
+
+        values.clear();
+
+        values.putAll(
+                loadedValues
+        );
+
+        incrementRevision();
+
+        cleanRevision =
+                revision;
+    }
+
+    private Map<String, Object> createSnapshot() {
         Map<String, Object> snapshot =
                 new LinkedHashMap<>();
 
-        for (SettingKey<?> key : registry.settings()) {
+        for (SettingKey<?> key
+                : registry.settings()) {
             Object value =
                     values.getOrDefault(
                             key.id(),
@@ -127,54 +366,53 @@ public final class DefaultPlayerSettings
             );
         }
 
-        return Map.copyOf(snapshot);
+        return Map.copyOf(
+                snapshot
+        );
     }
 
-    @Override
-    public boolean dirty() {
-        return dirty.get();
-    }
-
-    @Override
-    public void markClean() {
-        dirty.set(false);
-    }
-
-    @Override
-    public void load(
-            Map<String, Object> persistedValues
+    private <T> T getEffectiveValue(
+            SettingKey<T> key
     ) {
-        Objects.requireNonNull(
-                persistedValues,
-                "persistedValues"
+        Object value =
+                values.get(
+                        key.id()
+                );
+
+        if (value == null) {
+            return key.defaultValue();
+        }
+
+        return key.validate(
+                value
         );
+    }
 
-        values.clear();
+    private Object getEffectiveValueUntyped(
+            SettingKey<?> key
+    ) {
+        Object value =
+                values.get(
+                        key.id()
+                );
 
-        persistedValues.forEach(
-                (id, value) -> {
-                    SettingKey<?> key =
-                            registry.find(id)
-                                    .orElse(null);
+        if (value == null) {
+            return key.defaultValue();
+        }
 
-                    if (key == null) {
-                        return;
-                    }
-
-                    Object validated =
-                            validateUntyped(
-                                    key,
-                                    value
-                            );
-
-                    values.put(
-                            key.id(),
-                            validated
-                    );
-                }
+        return key.validate(
+                value
         );
+    }
 
-        dirty.set(false);
+    private void incrementRevision() {
+        if (revision == Long.MAX_VALUE) {
+            throw new IllegalStateException(
+                    "Player settings revision overflow."
+            );
+        }
+
+        revision++;
     }
 
     private void requireRegistered(
@@ -186,16 +424,21 @@ public final class DefaultPlayerSettings
         );
 
         SettingKey<?> registered =
-                registry.find(key.id())
+                registry.find(
+                                key.id()
+                        )
                         .orElseThrow(
-                                () -> new IllegalArgumentException(
-                                        "Setting is not registered: "
-                                                + key.id()
-                                )
+                                () ->
+                                        new IllegalArgumentException(
+                                                "Setting is not registered: "
+                                                        + key.id()
+                                        )
                         );
 
         if (registered != key
-                && !registered.equals(key)) {
+                && !registered.equals(
+                key
+        )) {
             throw new IllegalArgumentException(
                     "A different SettingKey instance is registered for id: "
                             + key.id()
@@ -207,6 +450,8 @@ public final class DefaultPlayerSettings
             SettingKey<?> key,
             Object value
     ) {
-        return key.validate(value);
+        return key.validate(
+                value
+        );
     }
 }

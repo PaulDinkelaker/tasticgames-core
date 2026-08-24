@@ -9,8 +9,10 @@ import de.tasticgames.player.PlayerManager;
 import de.tasticgames.player.PlayerState;
 import de.tasticgames.player.TasticPlayer;
 import de.tasticgames.settings.CoreSettings;
+import de.tasticgames.settings.PlayerSettingChange;
 import de.tasticgames.settings.PlayerSettings;
 import de.tasticgames.settings.PlayerSettingsService;
+import de.tasticgames.settings.PlayerSettingsState;
 import de.tasticgames.settings.SettingKey;
 import de.tasticgames.settings.SettingRegistry;
 
@@ -20,6 +22,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 public final class DefaultPlayerSettingsService
@@ -28,6 +34,10 @@ public final class DefaultPlayerSettingsService
     private final PlayerManager playerManager;
     private final SettingRegistry settingRegistry;
     private final ApiClient apiClient;
+
+    private final ConcurrentMap<UUID, CompletableFuture<Void>>
+            flushOperations =
+            new ConcurrentHashMap<>();
 
     public DefaultPlayerSettingsService(
             PlayerManager playerManager,
@@ -67,12 +77,17 @@ public final class DefaultPlayerSettingsService
     @Override
     public void stop() {
         try {
-            flushAll().join();
+            flushAll()
+                    .join();
         } catch (Exception exception) {
             throw new IllegalStateException(
                     "Failed to flush player settings during shutdown.",
-                    exception
+                    unwrap(
+                            exception
+                    )
             );
+        } finally {
+            flushOperations.clear();
         }
     }
 
@@ -96,7 +111,9 @@ public final class DefaultPlayerSettingsService
         );
 
         return player.settings()
-                .get(key);
+                .get(
+                        key
+                );
     }
 
     @Override
@@ -119,11 +136,98 @@ public final class DefaultPlayerSettingsService
                 player
         );
 
+        requireNormalSetting(
+                key
+        );
+
         player.settings()
                 .set(
                         key,
                         value
                 );
+    }
+
+    @Override
+    public <T> CompletableFuture<PlayerSettingChange<T>> update(
+            TasticPlayer player,
+            SettingKey<T> key,
+            T value
+    ) {
+        Objects.requireNonNull(
+                player,
+                "player"
+        );
+
+        Objects.requireNonNull(
+                key,
+                "key"
+        );
+
+        requireReady(
+                player
+        );
+
+        if (key.id().equals(
+                CoreSettings.LANGUAGE.id()
+        )) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Language must be updated through PlayerOnboardingService."
+                    )
+            );
+        }
+
+        PlayerSettings settings =
+                player.settings();
+
+        T previousValue =
+                settings.get(
+                        key
+                );
+
+        T validatedValue =
+                key.validate(
+                        value
+                );
+
+        PlayerSettingChange<T> change =
+                new PlayerSettingChange<>(
+                        player,
+                        key,
+                        previousValue,
+                        validatedValue
+                );
+
+        if (!change.changed()) {
+            return CompletableFuture.completedFuture(
+                    change
+            );
+        }
+
+        settings.set(
+                key,
+                validatedValue
+        );
+
+        return flushPlayer(
+                player
+        ).handle((ignored, throwable) -> {
+            if (throwable == null) {
+                return change;
+            }
+
+            settings.restoreIfCurrent(
+                    key,
+                    validatedValue,
+                    previousValue
+            );
+
+            throw new CompletionException(
+                    unwrap(
+                            throwable
+                    )
+            );
+        });
     }
 
     @Override
@@ -145,8 +249,14 @@ public final class DefaultPlayerSettingsService
                 player
         );
 
+        requireNormalSetting(
+                key
+        );
+
         player.settings()
-                .reset(key);
+                .reset(
+                        key
+                );
     }
 
     @Override
@@ -162,8 +272,20 @@ public final class DefaultPlayerSettingsService
                 player
         );
 
+        String language =
+                player.settings()
+                        .get(
+                                CoreSettings.LANGUAGE
+                        );
+
         player.settings()
                 .resetAll();
+
+        player.settings()
+                .setPersisted(
+                        CoreSettings.LANGUAGE,
+                        language
+                );
     }
 
     @Override
@@ -218,15 +340,24 @@ public final class DefaultPlayerSettingsService
                 "minecraftUuid"
         );
 
-        return playerManager
-                .find(minecraftUuid)
-                .map(this::flushPlayer)
-                .orElseGet(
-                        () ->
-                                CompletableFuture.completedFuture(
-                                        null
-                                )
-                );
+        TasticPlayer player =
+                playerManager
+                        .find(
+                                minecraftUuid
+                        )
+                        .orElse(
+                                null
+                        );
+
+        if (player == null) {
+            return CompletableFuture.completedFuture(
+                    null
+            );
+        }
+
+        return flushPlayer(
+                player
+        );
     }
 
     @Override
@@ -240,6 +371,12 @@ public final class DefaultPlayerSettingsService
                     flushPlayer(
                             player
                     )
+            );
+        }
+
+        if (operations.isEmpty()) {
+            return CompletableFuture.completedFuture(
+                    null
             );
         }
 
@@ -258,6 +395,51 @@ public final class DefaultPlayerSettingsService
                 "player"
         );
 
+        UUID minecraftUuid =
+                player.minecraftUuid();
+
+        CompletableFuture<Void> operation =
+                flushOperations.compute(
+                        minecraftUuid,
+                        (ignored, previousOperation) -> {
+                            CompletableFuture<Void> predecessor;
+
+                            if (previousOperation == null) {
+                                predecessor =
+                                        CompletableFuture.completedFuture(
+                                                null
+                                        );
+                            } else {
+                                predecessor =
+                                        previousOperation.handle(
+                                                (ignoredResult, ignoredThrowable) ->
+                                                        null
+                                        );
+                            }
+
+                            return predecessor.thenCompose(
+                                    ignoredResult ->
+                                            flushPlayerNow(
+                                                    player
+                                            )
+                            );
+                        }
+                );
+
+        operation.whenComplete(
+                (ignored, throwable) ->
+                        flushOperations.remove(
+                                minecraftUuid,
+                                operation
+                        )
+        );
+
+        return operation;
+    }
+
+    private CompletableFuture<Void> flushPlayerNow(
+            TasticPlayer player
+    ) {
         if (player.state() == PlayerState.FAILED) {
             return CompletableFuture.completedFuture(
                     null
@@ -273,9 +455,12 @@ public final class DefaultPlayerSettingsService
             );
         }
 
+        PlayerSettingsState state =
+                settings.state();
+
         List<PlayerSettingUpdate> updates =
                 createUpdates(
-                        settings.snapshot()
+                        state.values()
                 );
 
         return apiClient
@@ -289,7 +474,9 @@ public final class DefaultPlayerSettingsService
                             snapshot
                     );
 
-                    settings.markClean();
+                    settings.markClean(
+                            state.revision()
+                    );
                 });
     }
 
@@ -308,7 +495,9 @@ public final class DefaultPlayerSettingsService
         );
 
         if (!player.minecraftUuid()
-                .equals(snapshot.minecraftUuid())) {
+                .equals(
+                        snapshot.minecraftUuid()
+                )) {
             throw new IllegalStateException(
                     "Saved settings snapshot UUID does not match player UUID. "
                             + "Expected "
@@ -423,7 +612,9 @@ public final class DefaultPlayerSettingsService
         );
 
         if (!player.minecraftUuid()
-                .equals(snapshot.minecraftUuid())) {
+                .equals(
+                        snapshot.minecraftUuid()
+                )) {
             throw new IllegalStateException(
                     "Settings snapshot UUID does not match player UUID. "
                             + "Expected "
@@ -465,7 +656,7 @@ public final class DefaultPlayerSettingsService
                 );
 
         player.settings()
-                .set(
+                .setPersisted(
                         CoreSettings.LANGUAGE,
                         player.language()
                 );
@@ -486,5 +677,33 @@ public final class DefaultPlayerSettingsService
                             + "]"
             );
         }
+    }
+
+    private void requireNormalSetting(
+            SettingKey<?> key
+    ) {
+        if (key.id().equals(
+                CoreSettings.LANGUAGE.id()
+        )) {
+            throw new IllegalArgumentException(
+                    "Language must be updated through PlayerOnboardingService."
+            );
+        }
+    }
+
+    private Throwable unwrap(
+            Throwable throwable
+    ) {
+        Throwable current =
+                throwable;
+
+        while ((current instanceof CompletionException
+                || current instanceof ExecutionException)
+                && current.getCause() != null) {
+            current =
+                    current.getCause();
+        }
+
+        return current;
     }
 }

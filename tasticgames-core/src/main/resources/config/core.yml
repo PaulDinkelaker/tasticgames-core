@@ -3,3 +3,39 @@ server:
 
 presence:
   managed-by-proxy: true
+
+# Season pass (TasticPass). Off while the pass is still being built: with this off no server reports pass
+# progress and the lobby shows a "coming soon" notice instead of the pass menu.
+pass:
+  enabled: false
+
+# The chat belongs to TasticProxy: it renders every line once for the whole network and sends it to all
+# servers. This server therefore drops its own chat output - otherwise every message would appear twice.
+# Set this to false only when the proxy's global chat is off; the proxy cannot do it itself, because since
+# 1.19.1 cancelling a signed chat message there disconnects the player.
+chat:
+  handled-by-proxy: true
+
+# Network titles: the title a player equips in the lobby is shown on every server. The text comes from the
+# API catalog (the lobby fills it), so a title looks the same in the chat and above the head everywhere.
+# The line rides on the player, so it needs no movement packets of its own:
+#   offset    raises it above the mount point - larger values move it up, towards/past the name,
+#             smaller ones push it down (0.55 keeps it clearly below the name plate)
+#   scale     size relative to a normal nametag
+#   view-range 1.0 is roughly 64 blocks
+# Every viewer reads the title in their OWN language: one line per language actually in use rides on the
+# player, and each viewer has all but their own hidden. Nobody sees the line above their own head.
+titles:
+  enabled: true
+  nametag:
+    enabled: true
+    offset: 0.55
+    scale: 0.8
+    view-range: 0.6
+    hide-while-sneaking: true
+
+# The vanilla player list is emptied on every server: pressing TAB opens the overlay, but no entry is in it -
+# not even your own. Players stay fully visible in the world; only the list is empty. Set this to false if a
+# plugin like TAB should fill the list instead (it would overwrite the empty list anyway).
+tablist:
+  hidden: true

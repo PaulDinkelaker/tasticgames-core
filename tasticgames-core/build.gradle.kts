@@ -4,9 +4,10 @@ plugins {
 }
 
 group = "de.tasticgames"
-version = "0.1.0-SNAPSHOT"
+version = "1.0.0"
 
 repositories {
+    mavenLocal()
     mavenCentral()
 
     maven {
@@ -23,15 +24,17 @@ dependencies {
     )
 
     implementation(
-        "de.tasticgames:tasticgames-api-client:0.1.0-SNAPSHOT"
+        "de.tasticgames:tasticgames-api-client:1.0.0"
     )
 
     testImplementation(
         platform("org.junit:junit-bom:6.0.0")
     )
+
     testImplementation(
         "org.junit.jupiter:junit-jupiter"
     )
+
     testRuntimeOnly(
         "org.junit.platform:junit-platform-launcher"
     )
@@ -47,9 +50,14 @@ tasks.test {
 }
 
 tasks.processResources {
-    inputs.property("version", project.version)
+    inputs.property(
+        "version",
+        project.version
+    )
 
-    filesMatching("plugin.yml") {
+    filesMatching(
+        "plugin.yml"
+    ) {
         expand(
             "version" to project.version
         )
@@ -59,7 +67,8 @@ tasks.processResources {
 tasks.shadowJar {
     archiveClassifier.set("")
 
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    duplicatesStrategy =
+        DuplicatesStrategy.EXCLUDE
 
     exclude(
         "META-INF/LICENSE",
@@ -88,5 +97,7 @@ tasks.jar {
 }
 
 tasks.build {
-    dependsOn(tasks.shadowJar)
+    dependsOn(
+        tasks.shadowJar
+    )
 }

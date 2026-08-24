@@ -2,12 +2,14 @@ package de.tasticgames.player.listener;
 
 import de.tasticgames.TasticCorePlugin;
 import de.tasticgames.onboarding.PlayerOnboardingService;
+import de.tasticgames.pass.PlayerPassService;
 import de.tasticgames.player.PlayerManager;
 import de.tasticgames.player.TasticPlayer;
 import de.tasticgames.player.event.TasticPlayerLoadFailedEvent;
 import de.tasticgames.player.event.TasticPlayerReadyEvent;
 import de.tasticgames.player.event.TasticPlayerUnloadEvent;
 import de.tasticgames.settings.PlayerSettingsService;
+import de.tasticgames.title.PlayerTitleService;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -29,12 +31,16 @@ public final class PlayerRuntimeListener
     private final PlayerManager playerManager;
     private final PlayerSettingsService playerSettingsService;
     private final PlayerOnboardingService playerOnboardingService;
+    private final PlayerPassService playerPassService;
+    private final PlayerTitleService playerTitleService;
 
     public PlayerRuntimeListener(
             TasticCorePlugin plugin,
             PlayerManager playerManager,
             PlayerSettingsService playerSettingsService,
-            PlayerOnboardingService playerOnboardingService
+            PlayerOnboardingService playerOnboardingService,
+            PlayerPassService playerPassService,
+            PlayerTitleService playerTitleService
     ) {
         this.plugin = Objects.requireNonNull(
                 plugin,
@@ -55,6 +61,16 @@ public final class PlayerRuntimeListener
                 playerOnboardingService,
                 "playerOnboardingService"
         );
+
+        this.playerPassService = Objects.requireNonNull(
+                playerPassService,
+                "playerPassService"
+        );
+
+        this.playerTitleService = Objects.requireNonNull(
+                playerTitleService,
+                "playerTitleService"
+        );
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -71,39 +87,107 @@ public final class PlayerRuntimeListener
                 player.getName();
 
         playerManager
-                .load(player)
-                .thenCompose(tasticPlayer ->
-                        playerSettingsService
-                                .load(minecraftUuid)
-                                .thenCompose(ignored ->
-                                        playerOnboardingService
-                                                .load(minecraftUuid)
-                                )
-                                .thenApply(ignored ->
-                                        tasticPlayer
-                                )
+                .load(
+                        player
                 )
-                .whenComplete((tasticPlayer, throwable) -> {
-                    if (throwable != null) {
-                        handleAsyncLoadFailure(
-                                minecraftUuid,
-                                username,
-                                unwrap(throwable)
+                .thenCompose(tasticPlayer -> {
+                    if (!plugin.isEnabled()) {
+                        return CompletableFuture.failedFuture(
+                                new PluginShutdownDuringLoadException()
                         );
-
-                        return;
                     }
 
-                    plugin.getServer()
-                            .getScheduler()
-                            .runTask(
-                                    plugin,
-                                    () -> finalizePlayerLoad(
+                    if (!isPlayerOnline(
+                            minecraftUuid
+                    )) {
+                        return CompletableFuture.failedFuture(
+                                new PlayerDisconnectedDuringLoadException(
+                                        minecraftUuid
+                                )
+                        );
+                    }
+
+                    return playerSettingsService
+                            .load(
+                                    minecraftUuid
+                            )
+                            .thenApply(
+                                    ignored ->
+                                            tasticPlayer
+                            );
+                })
+                .thenCompose(tasticPlayer -> {
+                    if (!plugin.isEnabled()) {
+                        return CompletableFuture.failedFuture(
+                                new PluginShutdownDuringLoadException()
+                        );
+                    }
+
+                    if (!isPlayerOnline(
+                            minecraftUuid
+                    )) {
+                        return CompletableFuture.failedFuture(
+                                new PlayerDisconnectedDuringLoadException(
+                                        minecraftUuid
+                                )
+                        );
+                    }
+
+                    return playerOnboardingService
+                            .load(
+                                    minecraftUuid
+                            )
+                            .thenApply(
+                                    ignored ->
+                                            tasticPlayer
+                            );
+                })
+                .whenComplete(
+                        (tasticPlayer, throwable) -> {
+                            if (throwable != null) {
+                                Throwable cause =
+                                        unwrap(
+                                                throwable
+                                        );
+
+                                if (cause instanceof PluginShutdownDuringLoadException) {
+                                    return;
+                                }
+
+                                if (cause instanceof PlayerDisconnectedDuringLoadException) {
+                                    discardDisconnectedPlayer(
                                             minecraftUuid,
                                             username
-                                    )
-                            );
-                });
+                                    );
+
+                                    return;
+                                }
+
+                                handleAsyncLoadFailure(
+                                        minecraftUuid,
+                                        username,
+                                        cause
+                                );
+
+                                return;
+                            }
+
+                            if (!plugin.isEnabled()) {
+                                return;
+                            }
+
+                            plugin.getServer()
+                                    .getScheduler()
+                                    .runTask(
+                                            plugin,
+                                            () ->
+                                                    finalizePlayerLoad(
+                                                            minecraftUuid,
+                                                            username
+                                                    )
+                                    );
+                        }
+                );
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -120,78 +204,111 @@ public final class PlayerRuntimeListener
 
         TasticPlayer tasticPlayer =
                 playerManager
-                        .find(minecraftUuid)
-                        .orElse(null);
+                        .find(
+                                minecraftUuid
+                        )
+                        .orElse(
+                                null
+                        );
 
         playerSettingsService
-                .flush(minecraftUuid)
-                .handle((ignored, flushThrowable) -> {
-                    if (flushThrowable != null) {
-                        plugin.getLogger().warning(
-                                "Failed to flush settings for "
-                                        + username
-                                        + " ["
-                                        + minecraftUuid
-                                        + "]: "
-                                        + safeMessage(
-                                        unwrap(flushThrowable)
-                                )
-                        );
-                    }
-
-                    return null;
-                })
-                .thenCompose(ignored -> {
-                    playerOnboardingService.unload(
-                            minecraftUuid
-                    );
-
-                    return playerManager.unload(
-                            minecraftUuid
-                    );
-                })
-                .whenComplete((ignored, unloadThrowable) ->
-                        plugin.getServer()
-                                .getScheduler()
-                                .runTask(
-                                        plugin,
-                                        () -> {
-                                            if (unloadThrowable != null) {
-                                                plugin.getLogger().warning(
-                                                        "Failed to unload TasticPlayer "
-                                                                + username
-                                                                + " ["
-                                                                + minecraftUuid
-                                                                + "]: "
-                                                                + safeMessage(
-                                                                unwrap(
-                                                                        unloadThrowable
-                                                                )
+                .flush(
+                        minecraftUuid
+                )
+                .handle(
+                        (ignored, flushThrowable) -> {
+                            if (flushThrowable != null) {
+                                plugin.getLogger()
+                                        .warning(
+                                                "Failed to flush settings for "
+                                                        + username
+                                                        + " ["
+                                                        + minecraftUuid
+                                                        + "]: "
+                                                        + safeMessage(
+                                                        unwrap(
+                                                                flushThrowable
                                                         )
-                                                );
+                                                )
+                                        );
+                            }
 
-                                                return;
-                                            }
+                            return null;
+                        }
+                )
+                .thenCompose(
+                        ignored -> {
+                            playerPassService
+                                    .unload(
+                                            minecraftUuid
+                                    );
 
-                                            if (tasticPlayer != null) {
-                                                plugin.getServer()
-                                                        .getPluginManager()
-                                                        .callEvent(
-                                                                new TasticPlayerUnloadEvent(
-                                                                        tasticPlayer
-                                                                )
+                            playerTitleService
+                                    .unload(
+                                            minecraftUuid
+                                    );
+
+                            playerOnboardingService
+                                    .unload(
+                                            minecraftUuid
+                                    );
+
+                            return playerManager
+                                    .unload(
+                                            minecraftUuid
+                                    );
+                        }
+                )
+                .whenComplete(
+                        (ignored, unloadThrowable) -> {
+                            if (!plugin.isEnabled()) {
+                                return;
+                            }
+
+                            plugin.getServer()
+                                    .getScheduler()
+                                    .runTask(
+                                            plugin,
+                                            () -> {
+                                                if (unloadThrowable != null) {
+                                                    plugin.getLogger()
+                                                            .warning(
+                                                                    "Failed to unload TasticPlayer "
+                                                                            + username
+                                                                            + " ["
+                                                                            + minecraftUuid
+                                                                            + "]: "
+                                                                            + safeMessage(
+                                                                            unwrap(
+                                                                                    unloadThrowable
+                                                                            )
+                                                                    )
+                                                            );
+
+                                                    return;
+                                                }
+
+                                                if (tasticPlayer != null) {
+                                                    plugin.getServer()
+                                                            .getPluginManager()
+                                                            .callEvent(
+                                                                    new TasticPlayerUnloadEvent(
+                                                                            tasticPlayer
+                                                                    )
+                                                            );
+                                                }
+
+                                                plugin.getLogger()
+                                                        .info(
+                                                                "Unloaded TasticPlayer "
+                                                                        + username
+                                                                        + " ["
+                                                                        + minecraftUuid
+                                                                        + "]"
                                                         );
                                             }
-
-                                            plugin.getLogger().info(
-                                                    "Unloaded TasticPlayer "
-                                                            + username
-                                                            + " ["
-                                                            + minecraftUuid
-                                                            + "]"
-                                            );
-                                        }
-                                )
+                                    );
+                        }
                 );
     }
 
@@ -199,6 +316,10 @@ public final class PlayerRuntimeListener
             UUID minecraftUuid,
             String username
     ) {
+        if (!plugin.isEnabled()) {
+            return;
+        }
+
         Player onlinePlayer =
                 Bukkit.getPlayer(
                         minecraftUuid
@@ -216,9 +337,10 @@ public final class PlayerRuntimeListener
 
         try {
             TasticPlayer readyPlayer =
-                    playerManager.markReady(
-                            minecraftUuid
-                    );
+                    playerManager
+                            .markReady(
+                                    minecraftUuid
+                            );
 
             logLoadedPlayer(
                     readyPlayer
@@ -231,6 +353,13 @@ public final class PlayerRuntimeListener
                                     readyPlayer
                             )
                     );
+
+            // Der Title ist Schmuck: er wird nachgeladen und hält den Join nie auf.
+            playerTitleService
+                    .load(
+                            minecraftUuid
+                    );
+
         } catch (Exception exception) {
             handleAsyncLoadFailure(
                     minecraftUuid,
@@ -247,98 +376,149 @@ public final class PlayerRuntimeListener
     ) {
         cleanupFailedLoad(
                 minecraftUuid
-        ).whenComplete((ignored, cleanupThrowable) ->
-                plugin.getServer()
-                        .getScheduler()
-                        .runTask(
-                                plugin,
-                                () -> {
-                                    if (cleanupThrowable != null) {
-                                        plugin.getLogger().warning(
-                                                "Failed to clean up player runtime after load failure for "
-                                                        + username
-                                                        + " ["
-                                                        + minecraftUuid
-                                                        + "]: "
-                                                        + safeMessage(
-                                                        unwrap(
-                                                                cleanupThrowable
-                                                        )
-                                                )
+        ).whenComplete(
+                (ignored, cleanupThrowable) -> {
+                    if (!plugin.isEnabled()) {
+                        return;
+                    }
+
+                    plugin.getServer()
+                            .getScheduler()
+                            .runTask(
+                                    plugin,
+                                    () -> {
+                                        if (cleanupThrowable != null) {
+                                            plugin.getLogger()
+                                                    .warning(
+                                                            "Failed to clean up player runtime after load failure for "
+                                                                    + username
+                                                                    + " ["
+                                                                    + minecraftUuid
+                                                                    + "]: "
+                                                                    + safeMessage(
+                                                                    unwrap(
+                                                                            cleanupThrowable
+                                                                    )
+                                                            )
+                                                    );
+                                        }
+
+                                        handlePlayerLoadFailure(
+                                                minecraftUuid,
+                                                username,
+                                                cause
                                         );
                                     }
-
-                                    handlePlayerLoadFailure(
-                                            minecraftUuid,
-                                            username,
-                                            cause
-                                    );
-                                }
-                        )
+                            );
+                }
         );
     }
 
     private CompletableFuture<Void> cleanupFailedLoad(
             UUID minecraftUuid
     ) {
-        playerOnboardingService.unload(
-                minecraftUuid
-        );
+        playerPassService
+                .unload(
+                        minecraftUuid
+                );
 
-        return playerManager.failLoad(
-                minecraftUuid
-        );
+        playerTitleService
+                .unload(
+                        minecraftUuid
+                );
+
+        playerOnboardingService
+                .unload(
+                        minecraftUuid
+                );
+
+        return playerManager
+                .failLoad(
+                        minecraftUuid
+                );
     }
 
     private void discardDisconnectedPlayer(
             UUID minecraftUuid,
             String username
     ) {
-        playerOnboardingService.unload(
-                minecraftUuid
-        );
+        playerPassService
+                .unload(
+                        minecraftUuid
+                );
+
+        playerTitleService
+                .unload(
+                        minecraftUuid
+                );
+
+        playerOnboardingService
+                .unload(
+                        minecraftUuid
+                );
 
         playerManager
-                .unload(minecraftUuid)
-                .whenComplete((ignored, throwable) -> {
-                    if (throwable != null) {
-                        plugin.getLogger().warning(
-                                "Failed to discard disconnected TasticPlayer "
-                                        + username
-                                        + " ["
-                                        + minecraftUuid
-                                        + "]: "
-                                        + safeMessage(
-                                        unwrap(throwable)
-                                )
-                        );
+                .unload(
+                        minecraftUuid
+                )
+                .whenComplete(
+                        (ignored, throwable) -> {
+                            if (throwable != null) {
+                                plugin.getLogger()
+                                        .warning(
+                                                "Failed to discard disconnected TasticPlayer "
+                                                        + username
+                                                        + " ["
+                                                        + minecraftUuid
+                                                        + "]: "
+                                                        + safeMessage(
+                                                        unwrap(
+                                                                throwable
+                                                        )
+                                                )
+                                        );
 
-                        return;
-                    }
+                                return;
+                            }
 
-                    plugin.getLogger().info(
-                            "Discarded loaded TasticPlayer "
-                                    + username
-                                    + " ["
-                                    + minecraftUuid
-                                    + "] because the player is no longer online."
-                    );
-                });
+                            plugin.getLogger()
+                                    .info(
+                                            "Discarded loaded TasticPlayer "
+                                                    + username
+                                                    + " ["
+                                                    + minecraftUuid
+                                                    + "] because the player is no longer online."
+                                    );
+                        }
+                );
+    }
+
+    private boolean isPlayerOnline(
+            UUID minecraftUuid
+    ) {
+        Player player =
+                Bukkit.getPlayer(
+                        minecraftUuid
+                );
+
+        return player != null
+                && player.isOnline();
     }
 
     private void logLoadedPlayer(
             TasticPlayer player
     ) {
-        plugin.getLogger().info(
-                "Loaded TasticPlayer "
-                        + player.username()
-                        + " ["
-                        + player.minecraftUuid()
-                        + "], account "
-                        + player.accountId()
-                        + ", language "
-                        + player.language()
-        );
+        plugin.getLogger()
+                .info(
+                        "Loaded TasticPlayer "
+                                + player.username()
+                                + " ["
+                                + player.minecraftUuid()
+                                + "], account "
+                                + player.accountId()
+                                + ", language "
+                                + player.language()
+                );
     }
 
     private void handlePlayerLoadFailure(
@@ -346,19 +526,26 @@ public final class PlayerRuntimeListener
             String username,
             Throwable cause
     ) {
+        if (!plugin.isEnabled()) {
+            return;
+        }
+
         Player onlinePlayer =
                 Bukkit.getPlayer(
                         minecraftUuid
                 );
 
-        plugin.getLogger().severe(
-                "Failed to load TasticPlayer "
-                        + username
-                        + " ["
-                        + minecraftUuid
-                        + "]: "
-                        + safeMessage(cause)
-        );
+        plugin.getLogger()
+                .severe(
+                        "Failed to load TasticPlayer "
+                                + username
+                                + " ["
+                                + minecraftUuid
+                                + "]: "
+                                + safeMessage(
+                                cause
+                        )
+                );
 
         if (onlinePlayer == null
                 || !onlinePlayer.isOnline()) {
@@ -405,5 +592,28 @@ public final class PlayerRuntimeListener
         }
 
         return message;
+    }
+
+    private static final class PlayerDisconnectedDuringLoadException
+            extends RuntimeException {
+
+        private PlayerDisconnectedDuringLoadException(
+                UUID minecraftUuid
+        ) {
+            super(
+                    "Player disconnected during runtime initialization: "
+                            + minecraftUuid
+            );
+        }
+    }
+
+    private static final class PluginShutdownDuringLoadException
+            extends RuntimeException {
+
+        private PluginShutdownDuringLoadException() {
+            super(
+                    "TasticCore shutdown started during player runtime initialization."
+            );
+        }
     }
 }

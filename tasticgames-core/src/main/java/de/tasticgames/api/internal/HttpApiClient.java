@@ -24,12 +24,59 @@ import de.tasticgames.api.OnboardingSnapshot;
 import de.tasticgames.client.dto.OnboardingResponse;
 import de.tasticgames.client.dto.OnboardingStepResponse;
 import de.tasticgames.onboarding.OnboardingStep;
+import de.tasticgames.pass.PassAchievementUnlock;
+import de.tasticgames.pass.PassClaimSnapshot;
+import de.tasticgames.pass.PassGame;
+import de.tasticgames.pass.PassLeaderboardEntry;
+import de.tasticgames.pass.PassQuestDefinition;
+import de.tasticgames.pass.PassQuestScope;
+import de.tasticgames.pass.PassQuestSnapshot;
+import de.tasticgames.pass.PassQuestUpdate;
+import de.tasticgames.pass.PassRewardGrant;
+import de.tasticgames.pass.PassRewardGrantResult;
+import de.tasticgames.pass.PassRewardStatus;
+import de.tasticgames.pass.PassRewardType;
+import de.tasticgames.pass.PassSeasonSnapshot;
+import de.tasticgames.pass.PassSnapshot;
+import de.tasticgames.pass.PassTierSnapshot;
+import de.tasticgames.pass.PassTrack;
+import de.tasticgames.pass.PassXpResult;
+import de.tasticgames.pass.PassXpSource;
+import de.tasticgames.client.dto.pass.PassAchievementUnlockRequest;
+import de.tasticgames.client.dto.pass.PassAchievementUnlockResponse;
+import de.tasticgames.client.dto.pass.PassClaimResponse;
+import de.tasticgames.client.dto.pass.PassGameResponse;
+import de.tasticgames.client.dto.pass.PassLeaderboardEntryResponse;
+import de.tasticgames.client.dto.pass.PassLeaderboardResponse;
+import de.tasticgames.client.dto.pass.PassPlayerResponse;
+import de.tasticgames.client.dto.pass.PassQuestProgressRequest;
+import de.tasticgames.client.dto.pass.PassQuestProgressResponse;
+import de.tasticgames.client.dto.pass.PassQuestResponse;
+import de.tasticgames.client.dto.pass.PassQuestScopeResponse;
+import de.tasticgames.client.dto.pass.PassQuestUpdateResponse;
+import de.tasticgames.client.dto.pass.PassRewardClaimAllRequest;
+import de.tasticgames.client.dto.pass.PassRewardClaimRequest;
+import de.tasticgames.client.dto.pass.PassRewardClaimResponse;
+import de.tasticgames.client.dto.pass.PassRewardGrantResponse;
+import de.tasticgames.client.dto.pass.PassRewardStatusResponse;
+import de.tasticgames.client.dto.pass.PassRewardTypeResponse;
+import de.tasticgames.client.dto.pass.PassSeasonResponse;
+import de.tasticgames.client.dto.pass.PassTierResponse;
+import de.tasticgames.client.dto.pass.PassTrackResponse;
+import de.tasticgames.client.dto.pass.PassXpRequest;
+import de.tasticgames.client.dto.pass.PassXpResponse;
+import de.tasticgames.client.dto.pass.PassXpSourceResponse;
+import de.tasticgames.client.dto.network.NetworkTitleResponse;
+import de.tasticgames.title.NetworkTitle;
 
 import java.util.List;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -408,8 +455,292 @@ public final class HttpApiClient implements ApiClient {
     }
 
     @Override
+    public CompletableFuture<Optional<PassSeasonSnapshot>> getCurrentPassSeason() {
+        return execute(
+                delegate()
+                        .pass()
+                        .currentSeason()
+                        .thenApply(response ->
+                                response.map(
+                                        this::mapPassSeason
+                                )
+                        )
+        );
+    }
+
+    @Override
+    public CompletableFuture<PassSnapshot> getPass(
+            UUID minecraftUuid
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        return execute(
+                delegate()
+                        .pass()
+                        .player(minecraftUuid)
+                        .thenApply(this::mapPassSnapshot)
+        );
+    }
+
+    @Override
+    public CompletableFuture<PassXpResult> awardPassXp(
+            UUID minecraftUuid,
+            UUID operationId,
+            PassXpSource source,
+            long amount,
+            String reason,
+            String serverId
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        Objects.requireNonNull(
+                operationId,
+                "operationId"
+        );
+
+        Objects.requireNonNull(
+                source,
+                "source"
+        );
+
+        PassXpRequest request =
+                new PassXpRequest(
+                        operationId,
+                        mapPassXpSource(source),
+                        amount,
+                        reason,
+                        serverId
+                );
+
+        return execute(
+                delegate()
+                        .pass()
+                        .awardXp(
+                                minecraftUuid,
+                                request
+                        )
+                        .thenApply(this::mapPassXpResult)
+        );
+    }
+
+    @Override
+    public CompletableFuture<PassQuestUpdate> reportPassQuestProgress(
+            UUID minecraftUuid,
+            String questKey,
+            UUID operationId,
+            long amount,
+            String serverId
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        Objects.requireNonNull(
+                questKey,
+                "questKey"
+        );
+
+        Objects.requireNonNull(
+                operationId,
+                "operationId"
+        );
+
+        PassQuestProgressRequest request =
+                new PassQuestProgressRequest(
+                        operationId,
+                        amount,
+                        serverId
+                );
+
+        return execute(
+                delegate()
+                        .pass()
+                        .questProgress(
+                                minecraftUuid,
+                                questKey,
+                                request
+                        )
+                        .thenApply(this::mapPassQuestUpdate)
+        );
+    }
+
+    @Override
+    public CompletableFuture<PassAchievementUnlock> unlockPassAchievement(
+            UUID minecraftUuid,
+            UUID operationId,
+            String achievementKey,
+            String serverId
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        Objects.requireNonNull(
+                operationId,
+                "operationId"
+        );
+
+        Objects.requireNonNull(
+                achievementKey,
+                "achievementKey"
+        );
+
+        PassAchievementUnlockRequest request =
+                new PassAchievementUnlockRequest(
+                        operationId,
+                        achievementKey,
+                        serverId
+                );
+
+        return execute(
+                delegate()
+                        .pass()
+                        .unlockAchievement(
+                                minecraftUuid,
+                                request
+                        )
+                        .thenApply(this::mapPassAchievementUnlock)
+        );
+    }
+
+    @Override
+    public CompletableFuture<PassRewardGrantResult> claimPassReward(
+            UUID minecraftUuid,
+            UUID operationId,
+            int level,
+            PassTrack track
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        Objects.requireNonNull(
+                operationId,
+                "operationId"
+        );
+
+        Objects.requireNonNull(
+                track,
+                "track"
+        );
+
+        PassRewardClaimRequest request =
+                new PassRewardClaimRequest(
+                        operationId,
+                        level,
+                        mapPassTrack(track)
+                );
+
+        return execute(
+                delegate()
+                        .pass()
+                        .claimReward(
+                                minecraftUuid,
+                                request
+                        )
+                        .thenApply(this::mapPassRewardGrantResult)
+        );
+    }
+
+    @Override
+    public CompletableFuture<PassRewardGrantResult> claimAllPassRewards(
+            UUID minecraftUuid,
+            UUID operationId
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        Objects.requireNonNull(
+                operationId,
+                "operationId"
+        );
+
+        PassRewardClaimAllRequest request =
+                new PassRewardClaimAllRequest(
+                        operationId
+                );
+
+        return execute(
+                delegate()
+                        .pass()
+                        .claimAllRewards(
+                                minecraftUuid,
+                                request
+                        )
+                        .thenApply(this::mapPassRewardGrantResult)
+        );
+    }
+
+    @Override
+    public CompletableFuture<List<PassLeaderboardEntry>> getPassLeaderboard(
+            String seasonKey,
+            int limit
+    ) {
+        return execute(
+                delegate()
+                        .pass()
+                        .leaderboard(
+                                seasonKey,
+                                limit
+                        )
+                        .thenApply(this::mapPassLeaderboard)
+        );
+    }
+
+    @Override
+    public CompletableFuture<NetworkTitle> getNetworkTitle(
+            UUID minecraftUuid
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        return execute(
+                delegate()
+                        .network()
+                        .playerTitle(
+                                minecraftUuid
+                        )
+                        .thenApply(
+                                response ->
+                                        response.map(
+                                                this::mapNetworkTitle
+                                        ).orElseGet(
+                                                NetworkTitle::none
+                                        )
+                        )
+        );
+    }
+
+    @Override
     public boolean enabled() {
         return enabled;
+    }
+
+    private NetworkTitle mapNetworkTitle(
+            NetworkTitleResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new NetworkTitle(
+                response.cosmeticId(),
+                response.texts()
+        );
     }
 
     private ApiHealth mapHealth(
@@ -615,6 +946,501 @@ public final class HttpApiClient implements ApiClient {
 
             case COMPLETED ->
                     COMPLETED;
+        };
+    }
+
+    private PassSeasonSnapshot mapPassSeason(
+            PassSeasonResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new PassSeasonSnapshot(
+                response.key(),
+                response.displayName(),
+                response.maxLevel(),
+                response.xpBase(),
+                response.xpGrowth(),
+                response.premiumPriceCents(),
+                response.currency(),
+                response.startsAt(),
+                response.endsAt(),
+                response.tiers()
+                        .stream()
+                        .map(this::mapPassTier)
+                        .toList(),
+                response.quests()
+                        .stream()
+                        .map(this::mapPassQuestDefinition)
+                        .toList(),
+                mapPassDailyXpCaps(
+                        response.dailyXpCaps()
+                )
+        );
+    }
+
+    private PassTierSnapshot mapPassTier(
+            PassTierResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new PassTierSnapshot(
+                response.level(),
+                mapPassTrack(
+                        response.track()
+                ),
+                mapPassRewardType(
+                        response.rewardType()
+                ),
+                response.rewardValue(),
+                response.rewardAmount(),
+                response.displayKey(),
+                response.icon()
+        );
+    }
+
+    private PassQuestDefinition mapPassQuestDefinition(
+            PassQuestResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new PassQuestDefinition(
+                response.key(),
+                mapPassQuestScope(
+                        response.scope()
+                ),
+                mapPassGame(
+                        response.game()
+                ),
+                response.metric(),
+                response.target(),
+                response.xpReward(),
+                response.premiumOnly(),
+                response.displayKey(),
+                response.sortOrder()
+        );
+    }
+
+    private Map<PassXpSource, Integer> mapPassDailyXpCaps(
+            Map<String, Integer> caps
+    ) {
+        if (caps == null
+                || caps.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<PassXpSource, Integer> mappedCaps =
+                new EnumMap<>(
+                        PassXpSource.class
+                );
+
+        for (Map.Entry<String, Integer> entry
+                : caps.entrySet()) {
+            PassXpSource source =
+                    parsePassXpSource(
+                            entry.getKey()
+                    );
+
+            if (source == null
+                    || entry.getValue() == null) {
+                continue;
+            }
+
+            mappedCaps.put(
+                    source,
+                    entry.getValue()
+            );
+        }
+
+        return mappedCaps;
+    }
+
+    private PassXpSource parsePassXpSource(
+            String name
+    ) {
+        if (name == null
+                || name.isBlank()) {
+            return null;
+        }
+
+        String normalized =
+                name.trim();
+
+        for (PassXpSource source
+                : PassXpSource.values()) {
+            if (source.name().equalsIgnoreCase(
+                    normalized
+            )) {
+                return source;
+            }
+        }
+
+        return null;
+    }
+
+    private PassSnapshot mapPassSnapshot(
+            PassPlayerResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new PassSnapshot(
+                response.seasonActive(),
+                response.seasonKey(),
+                response.seasonDisplayName(),
+                response.level(),
+                response.maxLevel(),
+                response.totalXp(),
+                response.xpIntoLevel(),
+                response.xpForNextLevel(),
+                response.premium(),
+                response.premiumPriceCents(),
+                response.currency(),
+                response.seasonEndsAt(),
+                response.claims()
+                        .stream()
+                        .map(this::mapPassClaim)
+                        .toList(),
+                response.quests()
+                        .stream()
+                        .map(this::mapPassQuest)
+                        .toList(),
+                response.features(),
+                response.achievements(),
+                response.xpMultiplier(),
+                response.xpMultiplierUntil(),
+                response.version()
+        );
+    }
+
+    private PassClaimSnapshot mapPassClaim(
+            PassClaimResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new PassClaimSnapshot(
+                response.level(),
+                mapPassTrack(
+                        response.track()
+                ),
+                mapPassRewardType(
+                        response.rewardType()
+                ),
+                response.rewardValue(),
+                response.rewardAmount(),
+                response.claimedAt()
+        );
+    }
+
+    private PassQuestSnapshot mapPassQuest(
+            PassQuestProgressResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new PassQuestSnapshot(
+                response.questKey(),
+                mapPassQuestScope(
+                        response.scope()
+                ),
+                mapPassGame(
+                        response.game()
+                ),
+                response.metric(),
+                response.target(),
+                response.progress(),
+                response.completed(),
+                response.xpReward(),
+                response.premiumOnly(),
+                response.displayKey(),
+                response.periodKey(),
+                response.resetsAt(),
+                response.sortOrder()
+        );
+    }
+
+    private PassXpResult mapPassXpResult(
+            PassXpResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new PassXpResult(
+                response.applied(),
+                response.outcome(),
+                response.duplicate(),
+                response.requestedAmount(),
+                response.appliedAmount(),
+                response.dailyRemaining(),
+                response.levelBefore(),
+                response.levelAfter(),
+                response.totalXp(),
+                response.xpIntoLevel(),
+                response.xpForNextLevel(),
+                response.unlockedTiers()
+                        .stream()
+                        .map(this::mapPassTier)
+                        .toList()
+        );
+    }
+
+    private PassQuestUpdate mapPassQuestUpdate(
+            PassQuestUpdateResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        PassQuestProgressResponse quest =
+                response.quest();
+
+        PassXpResponse xp =
+                response.xp();
+
+        return new PassQuestUpdate(
+                quest == null
+                        ? null
+                        : mapPassQuest(quest),
+                response.completedNow(),
+                xp == null
+                        ? null
+                        : mapPassXpResult(xp)
+        );
+    }
+
+    private PassAchievementUnlock mapPassAchievementUnlock(
+            PassAchievementUnlockResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        PassXpResponse xp =
+                response.xp();
+
+        return new PassAchievementUnlock(
+                response.unlockedNow(),
+                response.achievementKey(),
+                xp == null
+                        ? null
+                        : mapPassXpResult(xp)
+        );
+    }
+
+    private PassRewardGrantResult mapPassRewardGrantResult(
+            PassRewardClaimResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        PassPlayerResponse state =
+                response.state();
+
+        return new PassRewardGrantResult(
+                response.applied(),
+                response.outcome(),
+                response.duplicate(),
+                response.granted()
+                        .stream()
+                        .map(this::mapPassRewardGrant)
+                        .toList(),
+                state == null
+                        ? null
+                        : mapPassSnapshot(state)
+        );
+    }
+
+    private PassRewardGrant mapPassRewardGrant(
+            PassRewardGrantResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new PassRewardGrant(
+                response.level(),
+                mapPassTrack(
+                        response.track()
+                ),
+                mapPassRewardType(
+                        response.rewardType()
+                ),
+                response.rewardValue(),
+                response.rewardAmount(),
+                mapPassRewardStatus(
+                        response.status()
+                )
+        );
+    }
+
+    private List<PassLeaderboardEntry> mapPassLeaderboard(
+            PassLeaderboardResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return response.entries()
+                .stream()
+                .map(this::mapPassLeaderboardEntry)
+                .toList();
+    }
+
+    private PassLeaderboardEntry mapPassLeaderboardEntry(
+            PassLeaderboardEntryResponse response
+    ) {
+        Objects.requireNonNull(
+                response,
+                "response"
+        );
+
+        return new PassLeaderboardEntry(
+                response.rank(),
+                response.player(),
+                response.name(),
+                response.level(),
+                response.totalXp(),
+                response.premium()
+        );
+    }
+
+    private PassTrack mapPassTrack(
+            PassTrackResponse track
+    ) {
+        Objects.requireNonNull(
+                track,
+                "track"
+        );
+
+        return switch (track) {
+            case FREE -> PassTrack.FREE;
+            case PREMIUM -> PassTrack.PREMIUM;
+        };
+    }
+
+    private PassTrackResponse mapPassTrack(
+            PassTrack track
+    ) {
+        Objects.requireNonNull(
+                track,
+                "track"
+        );
+
+        return switch (track) {
+            case FREE -> PassTrackResponse.FREE;
+            case PREMIUM -> PassTrackResponse.PREMIUM;
+        };
+    }
+
+    private PassRewardType mapPassRewardType(
+            PassRewardTypeResponse rewardType
+    ) {
+        Objects.requireNonNull(
+                rewardType,
+                "rewardType"
+        );
+
+        return switch (rewardType) {
+            case COSMETIC -> PassRewardType.COSMETIC;
+            case CRUMBS -> PassRewardType.CRUMBS;
+            case COOKIES -> PassRewardType.COOKIES;
+            case XP_BOOST -> PassRewardType.XP_BOOST;
+            case FEATURE -> PassRewardType.FEATURE;
+        };
+    }
+
+    private PassQuestScope mapPassQuestScope(
+            PassQuestScopeResponse scope
+    ) {
+        Objects.requireNonNull(
+                scope,
+                "scope"
+        );
+
+        return switch (scope) {
+            case DAILY -> PassQuestScope.DAILY;
+            case WEEKLY -> PassQuestScope.WEEKLY;
+            case SEASON -> PassQuestScope.SEASON;
+        };
+    }
+
+    private PassGame mapPassGame(
+            PassGameResponse game
+    ) {
+        Objects.requireNonNull(
+                game,
+                "game"
+        );
+
+        return switch (game) {
+            case COOKIE -> PassGame.COOKIE;
+            case SURVIVAL -> PassGame.SURVIVAL;
+            case DUELS -> PassGame.DUELS;
+            case CREATIVE -> PassGame.CREATIVE;
+            case NETWORK -> PassGame.NETWORK;
+        };
+    }
+
+    private PassRewardStatus mapPassRewardStatus(
+            PassRewardStatusResponse status
+    ) {
+        Objects.requireNonNull(
+                status,
+                "status"
+        );
+
+        return switch (status) {
+            case GRANTED -> PassRewardStatus.GRANTED;
+            case ALREADY_OWNED -> PassRewardStatus.ALREADY_OWNED;
+            case DEFERRED -> PassRewardStatus.DEFERRED;
+        };
+    }
+
+    private PassXpSourceResponse mapPassXpSource(
+            PassXpSource source
+    ) {
+        Objects.requireNonNull(
+                source,
+                "source"
+        );
+
+        return switch (source) {
+            case COOKIE_CLICKS -> PassXpSourceResponse.COOKIE_CLICKS;
+            case COOKIE_PURCHASE -> PassXpSourceResponse.COOKIE_PURCHASE;
+            case COOKIE_PRESTIGE -> PassXpSourceResponse.COOKIE_PRESTIGE;
+            case COOKIE_GOLDEN -> PassXpSourceResponse.COOKIE_GOLDEN;
+            case COOKIE_ZONE -> PassXpSourceResponse.COOKIE_ZONE;
+            case QUEST -> PassXpSourceResponse.QUEST;
+            case ACHIEVEMENT -> PassXpSourceResponse.ACHIEVEMENT;
+            case PLAYTIME -> PassXpSourceResponse.PLAYTIME;
+            case EVENT -> PassXpSourceResponse.EVENT;
+            case ADMIN -> PassXpSourceResponse.ADMIN;
+            case SURVIVAL -> PassXpSourceResponse.SURVIVAL;
+            case DUELS -> PassXpSourceResponse.DUELS;
+            case CREATIVE -> PassXpSourceResponse.CREATIVE;
         };
     }
 

@@ -1,11 +1,15 @@
 package de.tasticgames.onboarding.internal;
 
+import de.tasticgames.TasticCorePlugin;
 import de.tasticgames.api.ApiClient;
 import de.tasticgames.api.OnboardingSnapshot;
+import de.tasticgames.localization.SupportedLanguage;
 import de.tasticgames.onboarding.PlayerOnboarding;
 import de.tasticgames.onboarding.PlayerOnboardingService;
+import de.tasticgames.player.PlayerLanguageChange;
 import de.tasticgames.player.PlayerManager;
 import de.tasticgames.player.TasticPlayer;
+import de.tasticgames.player.event.TasticPlayerLanguageChangedEvent;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -17,6 +21,7 @@ import java.util.concurrent.ConcurrentMap;
 public final class DefaultPlayerOnboardingService
         implements PlayerOnboardingService {
 
+    private final TasticCorePlugin plugin;
     private final ApiClient apiClient;
     private final PlayerManager playerManager;
 
@@ -28,9 +33,15 @@ public final class DefaultPlayerOnboardingService
             new ConcurrentHashMap<>();
 
     public DefaultPlayerOnboardingService(
+            TasticCorePlugin plugin,
             ApiClient apiClient,
             PlayerManager playerManager
     ) {
+        this.plugin = Objects.requireNonNull(
+                plugin,
+                "plugin"
+        );
+
         this.apiClient = Objects.requireNonNull(
                 apiClient,
                 "apiClient"
@@ -89,9 +100,10 @@ public final class DefaultPlayerOnboardingService
 
         return loadingOperations.computeIfAbsent(
                 minecraftUuid,
-                ignored -> startLoad(
-                        player
-                )
+                ignored ->
+                        startLoad(
+                                player
+                        )
         );
     }
 
@@ -145,10 +157,10 @@ public final class DefaultPlayerOnboardingService
                 "minecraftUuid"
         );
 
-        Objects.requireNonNull(
-                language,
-                "language"
-        );
+        SupportedLanguage supportedLanguage =
+                SupportedLanguage.require(
+                        language
+                );
 
         require(
                 minecraftUuid
@@ -157,14 +169,14 @@ public final class DefaultPlayerOnboardingService
         return apiClient
                 .selectOnboardingLanguage(
                         minecraftUuid,
-                        language
+                        supportedLanguage.code()
                 )
-                .thenApply(
-                        snapshot ->
-                                applySnapshot(
-                                        minecraftUuid,
-                                        snapshot
-                                )
+                .thenCompose(snapshot ->
+                        applyLanguageSelection(
+                                minecraftUuid,
+                                supportedLanguage,
+                                snapshot
+                        )
                 );
     }
 
@@ -185,12 +197,11 @@ public final class DefaultPlayerOnboardingService
                 .completeOnboarding(
                         minecraftUuid
                 )
-                .thenApply(
-                        snapshot ->
-                                applySnapshot(
-                                        minecraftUuid,
-                                        snapshot
-                                )
+                .thenApply(snapshot ->
+                        applySnapshot(
+                                minecraftUuid,
+                                snapshot
+                        )
                 );
     }
 
@@ -228,12 +239,11 @@ public final class DefaultPlayerOnboardingService
                         .getOnboarding(
                                 minecraftUuid
                         )
-                        .thenApply(
-                                snapshot ->
-                                        createOrUpdateState(
-                                                player,
-                                                snapshot
-                                        )
+                        .thenApply(snapshot ->
+                                createOrUpdateState(
+                                        player,
+                                        snapshot
+                                )
                         );
 
         operation.whenComplete(
@@ -245,6 +255,97 @@ public final class DefaultPlayerOnboardingService
         );
 
         return operation;
+    }
+
+    private CompletableFuture<PlayerOnboarding> applyLanguageSelection(
+            UUID minecraftUuid,
+            SupportedLanguage language,
+            OnboardingSnapshot snapshot
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        Objects.requireNonNull(
+                language,
+                "language"
+        );
+
+        Objects.requireNonNull(
+                snapshot,
+                "snapshot"
+        );
+
+        if (!plugin.isEnabled()) {
+            return CompletableFuture.completedFuture(
+                    createDetachedState(
+                            snapshot
+                    )
+            );
+        }
+
+        CompletableFuture<PlayerOnboarding> result =
+                new CompletableFuture<>();
+
+        plugin.getServer()
+                .getScheduler()
+                .runTask(
+                        plugin,
+                        () -> {
+                            try {
+                                Optional<TasticPlayer> optionalPlayer =
+                                        playerManager.find(
+                                                minecraftUuid
+                                        );
+
+                                if (optionalPlayer.isEmpty()
+                                        || !optionalPlayer.get().ready()) {
+                                    result.complete(
+                                            createDetachedState(
+                                                    snapshot
+                                            )
+                                    );
+
+                                    return;
+                                }
+
+                                PlayerOnboarding onboarding =
+                                        applySnapshot(
+                                                minecraftUuid,
+                                                snapshot
+                                        );
+
+                                PlayerLanguageChange change =
+                                        playerManager.updateLanguage(
+                                                minecraftUuid,
+                                                language
+                                        );
+
+                                if (change.changed()) {
+                                    plugin.getServer()
+                                            .getPluginManager()
+                                            .callEvent(
+                                                    new TasticPlayerLanguageChangedEvent(
+                                                            change.player(),
+                                                            change.previousLanguage(),
+                                                            change.newLanguage()
+                                                    )
+                                            );
+                                }
+
+                                result.complete(
+                                        onboarding
+                                );
+                            } catch (Throwable throwable) {
+                                result.completeExceptionally(
+                                        throwable
+                                );
+                            }
+                        }
+                );
+
+        return result;
     }
 
     private PlayerOnboarding createOrUpdateState(
@@ -288,6 +389,16 @@ public final class DefaultPlayerOnboardingService
             UUID minecraftUuid,
             OnboardingSnapshot snapshot
     ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        Objects.requireNonNull(
+                snapshot,
+                "snapshot"
+        );
+
         TasticPlayer player =
                 playerManager.requireLoaded(
                         minecraftUuid
@@ -296,6 +407,25 @@ public final class DefaultPlayerOnboardingService
         return createOrUpdateState(
                 player,
                 snapshot
+        );
+    }
+
+    private PlayerOnboarding createDetachedState(
+            OnboardingSnapshot snapshot
+    ) {
+        Objects.requireNonNull(
+                snapshot,
+                "snapshot"
+        );
+
+        return new PlayerOnboarding(
+                snapshot.accountId(),
+                snapshot.minecraftUuid(),
+                snapshot.currentStep(),
+                snapshot.languageSelected(),
+                snapshot.completed(),
+                snapshot.languageSelectedAt(),
+                snapshot.completedAt()
         );
     }
 
@@ -314,7 +444,9 @@ public final class DefaultPlayerOnboardingService
         );
 
         if (!player.minecraftUuid()
-                .equals(snapshot.minecraftUuid())) {
+                .equals(
+                        snapshot.minecraftUuid()
+                )) {
             throw new IllegalStateException(
                     "Onboarding snapshot UUID does not match player UUID. "
                             + "Expected "

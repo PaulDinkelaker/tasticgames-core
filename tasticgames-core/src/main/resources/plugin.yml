@@ -1,11 +1,12 @@
 name: TasticCore
 version: ${version}
 main: de.tasticgames.TasticCorePlugin
-api-version: '1.21'
+api-version: '1.21.11'
 authors:
   - PaulDinkelaker
 description: Core platform plugin for the TasticGames network.
 website: https://tasticgames.de
+
 commands:
   tasticcore:
     description: "Technical diagnostics for TasticCore"

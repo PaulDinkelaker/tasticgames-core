@@ -3,14 +3,18 @@ package de.tasticgames.player.internal;
 import de.tasticgames.account.AccountProfile;
 import de.tasticgames.account.AccountService;
 import de.tasticgames.api.MinecraftAccount;
+import de.tasticgames.localization.SupportedLanguage;
+import de.tasticgames.player.PlayerLanguageChange;
 import de.tasticgames.player.PlayerManager;
 import de.tasticgames.player.PlayerRuntimeContext;
 import de.tasticgames.player.PlayerState;
 import de.tasticgames.player.TasticPlayer;
+import de.tasticgames.settings.CoreSettings;
 import de.tasticgames.settings.SettingRegistry;
 import de.tasticgames.settings.internal.DefaultPlayerSettings;
 import org.bukkit.entity.Player;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
@@ -277,6 +281,81 @@ public final class DefaultPlayerManager
         }
 
         return session;
+    }
+
+    @Override
+    public PlayerLanguageChange updateLanguage(
+            UUID minecraftUuid,
+            SupportedLanguage language
+    ) {
+        Objects.requireNonNull(
+                minecraftUuid,
+                "minecraftUuid"
+        );
+
+        Objects.requireNonNull(
+                language,
+                "language"
+        );
+
+        PlayerSession session =
+                sessions.get(
+                        minecraftUuid
+                );
+
+        if (session == null) {
+            throw new IllegalStateException(
+                    "TasticPlayer is not loaded: "
+                            + minecraftUuid
+            );
+        }
+
+        synchronized (session) {
+            if (!session.ready()) {
+                throw new IllegalStateException(
+                        "Cannot update language of a TasticPlayer that is not ready: "
+                                + minecraftUuid
+                                + " [state="
+                                + session.state()
+                                + "]"
+                );
+            }
+
+            SupportedLanguage previousLanguage =
+                    SupportedLanguage.require(
+                            session.language()
+                    );
+
+            if (previousLanguage == language) {
+                return new PlayerLanguageChange(
+                        session,
+                        previousLanguage,
+                        language
+                );
+            }
+
+            session.accountProfile()
+                    .language(
+                            language.code()
+                    );
+
+            session.accountProfile()
+                    .updatedAt(
+                            Instant.now()
+                    );
+
+            session.settings()
+                    .setPersisted(
+                            CoreSettings.LANGUAGE,
+                            language.code()
+                    );
+
+            return new PlayerLanguageChange(
+                    session,
+                    previousLanguage,
+                    language
+            );
+        }
     }
 
     @Override

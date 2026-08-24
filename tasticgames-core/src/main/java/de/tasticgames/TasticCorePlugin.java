@@ -4,46 +4,82 @@ import de.tasticgames.api.TasticCoreApi;
 import de.tasticgames.bootstrap.CoreBootstrap;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public final class TasticCorePlugin extends JavaPlugin {
+public final class TasticCorePlugin
+        extends JavaPlugin {
+
+    private static TasticCorePlugin instance;
 
     private CoreBootstrap bootstrap;
-    private static TasticCorePlugin instance;
 
     @Override
     public void onEnable() {
-        instance = this;
         try {
-            bootstrap = new CoreBootstrap(this);
-            bootstrap.start();
+            CoreBootstrap newBootstrap =
+                    new CoreBootstrap(
+                            this
+                    );
+
+            newBootstrap.start();
+
+            bootstrap =
+                    newBootstrap;
+
+            instance =
+                    this;
+
         } catch (Exception exception) {
-            getLogger().severe("TasticCore failed to start.");
+            getLogger().severe(
+                    "TasticCore failed to start."
+            );
+
             exception.printStackTrace();
 
-            getServer().getPluginManager().disablePlugin(this);
+            instance =
+                    null;
+
+            bootstrap =
+                    null;
+
+            getServer()
+                    .getPluginManager()
+                    .disablePlugin(
+                            this
+                    );
         }
     }
 
     @Override
     public void onDisable() {
-        if (bootstrap == null) {
-            return;
-        }
-
         try {
-            bootstrap.stop();
+            CoreBootstrap currentBootstrap =
+                    bootstrap;
+
+            if (currentBootstrap != null) {
+                currentBootstrap.stop();
+            }
+
         } catch (Exception exception) {
-            getLogger().severe("TasticCore failed to stop cleanly.");
+            getLogger().severe(
+                    "TasticCore failed to stop cleanly."
+            );
+
             exception.printStackTrace();
+
         } finally {
-            bootstrap = null;
+            bootstrap =
+                    null;
+
+            instance =
+                    null;
         }
-        instance = null;
     }
 
     public static TasticCorePlugin instance() {
-        TasticCorePlugin current = instance;
+        TasticCorePlugin current =
+                instance;
 
-        if (current == null) {
+        if (current == null
+                || !current.isEnabled()) {
             throw new IllegalStateException(
                     "TasticCore is not enabled."
             );
@@ -53,12 +89,16 @@ public final class TasticCorePlugin extends JavaPlugin {
     }
 
     public TasticCoreApi api() {
-        if (bootstrap == null) {
+        CoreBootstrap currentBootstrap =
+                bootstrap;
+
+        if (currentBootstrap == null
+                || !currentBootstrap.isRunning()) {
             throw new IllegalStateException(
-                    "TasticCore bootstrap is not initialized."
+                    "TasticCore bootstrap is not running."
             );
         }
 
-        return bootstrap.coreApi();
+        return currentBootstrap.coreApi();
     }
 }

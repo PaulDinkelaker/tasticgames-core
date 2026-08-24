@@ -1,5 +1,6 @@
 package de.tasticgames.player;
 
+import de.tasticgames.localization.SupportedLanguage;
 import de.tasticgames.service.Service;
 import org.bukkit.entity.Player;
 
@@ -8,7 +9,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
-public interface PlayerManager extends Service {
+public interface PlayerManager
+        extends Service {
 
     CompletableFuture<TasticPlayer> load(
             Player player
@@ -32,6 +34,11 @@ public interface PlayerManager extends Service {
 
     TasticPlayer markReady(
             UUID minecraftUuid
+    );
+
+    PlayerLanguageChange updateLanguage(
+            UUID minecraftUuid,
+            SupportedLanguage language
     );
 
     CompletableFuture<Void> failLoad(
