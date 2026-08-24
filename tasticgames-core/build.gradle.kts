@@ -6,6 +6,8 @@ plugins {
 group = "de.tasticgames"
 version = "1.0.0"
 
+val pluginVersion = version.toString()
+
 repositories {
     mavenLocal()
     mavenCentral()
@@ -52,14 +54,14 @@ tasks.test {
 tasks.processResources {
     inputs.property(
         "version",
-        project.version
+        pluginVersion
     )
 
     filesMatching(
         "plugin.yml"
     ) {
         expand(
-            "version" to project.version
+            "version" to pluginVersion
         )
     }
 }
@@ -90,6 +92,10 @@ tasks.shadowJar {
     )
 
     mergeServiceFiles()
+
+    filesMatching("META-INF/services/**") {
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    }
 }
 
 tasks.jar {

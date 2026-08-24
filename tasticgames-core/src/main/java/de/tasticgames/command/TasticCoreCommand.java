@@ -1,18 +1,19 @@
 package de.tasticgames.command;
 
+import de.tasticgames.api.ApiClient;
 import de.tasticgames.player.PlayerManager;
 import de.tasticgames.player.TasticPlayer;
+import de.tasticgames.service.ServiceRegistry;
 import de.tasticgames.settings.PlayerSettingsService;
 import de.tasticgames.settings.SettingKey;
 import de.tasticgames.settings.SettingRegistry;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
-import de.tasticgames.api.ApiClient;
-import de.tasticgames.service.ServiceRegistry;
 
 import java.time.Duration;
 import java.util.Map;
@@ -69,9 +70,10 @@ public final class TasticCoreCommand
             String[] args
     ) {
         if (!sender.hasPermission("tasticcore.admin")) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "You do not have permission to use this command."
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "You do not have permission to use this command."
             );
 
             return true;
@@ -128,9 +130,10 @@ public final class TasticCoreCommand
             String[] args
     ) {
         if (args.length != 2) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Usage: /tasticcore player <name>"
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Usage: /tasticcore player <name>"
             );
 
             return true;
@@ -140,9 +143,10 @@ public final class TasticCoreCommand
                 Bukkit.getPlayerExact(args[1]);
 
         if (player == null) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Player not online."
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Player not online."
             );
 
             return true;
@@ -154,9 +158,10 @@ public final class TasticCoreCommand
                 );
 
         if (runtime.isEmpty()) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "No runtime loaded."
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "No runtime loaded."
             );
 
             return true;
@@ -165,10 +170,11 @@ public final class TasticCoreCommand
         TasticPlayer tasticPlayer =
                 runtime.get();
 
-        sender.sendMessage("");
-        sender.sendMessage(
-                ChatColor.GOLD
-                        + "=== TasticPlayer ==="
+        sendBlank(sender);
+        sendColored(
+                sender,
+                NamedTextColor.GOLD,
+                "=== TasticPlayer ==="
         );
 
         sendValue(
@@ -270,7 +276,7 @@ public final class TasticCoreCommand
                 tasticPlayer.updatedAt()
         );
 
-        sender.sendMessage("");
+        sendBlank(sender);
 
         return true;
     }
@@ -280,9 +286,10 @@ public final class TasticCoreCommand
             String[] args
     ) {
         if (args.length != 2) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Usage: /tasticcore flush <player>"
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Usage: /tasticcore flush <player>"
             );
 
             return true;
@@ -292,9 +299,10 @@ public final class TasticCoreCommand
                 Bukkit.getPlayerExact(args[1]);
 
         if (player == null) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Player not online."
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Player not online."
             );
 
             return true;
@@ -306,9 +314,10 @@ public final class TasticCoreCommand
                 );
 
         if (runtime.isEmpty()) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Runtime not loaded."
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Runtime not loaded."
             );
 
             return true;
@@ -330,9 +339,10 @@ public final class TasticCoreCommand
                         Bukkit.getScheduler().runTask(
                                 Bukkit.getPluginManager()
                                         .getPlugin("TasticCore"),
-                                () -> sender.sendMessage(
-                                        ChatColor.RED
-                                                + "Settings flush failed: "
+                                () -> sendColored(
+                                        sender,
+                                        NamedTextColor.RED,
+                                        "Settings flush failed: "
                                                 + safeMessage(cause)
                                 )
                         );
@@ -344,9 +354,10 @@ public final class TasticCoreCommand
                             Bukkit.getPluginManager()
                                     .getPlugin("TasticCore"),
                             () -> {
-                                sender.sendMessage(
-                                        ChatColor.GREEN
-                                                + "Flushed settings for "
+                                sendColored(
+                                        sender,
+                                        NamedTextColor.GREEN,
+                                        "Flushed settings for "
                                                 + tasticPlayer.username()
                                 );
 
@@ -401,9 +412,10 @@ public final class TasticCoreCommand
             String[] args
     ) {
         if (args.length != 4) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Usage: /tasticcore setting "
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Usage: /tasticcore setting "
                             + "<player> <setting> <value>"
             );
 
@@ -414,9 +426,10 @@ public final class TasticCoreCommand
                 Bukkit.getPlayerExact(args[1]);
 
         if (player == null) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Player not online."
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Player not online."
             );
 
             return true;
@@ -428,9 +441,10 @@ public final class TasticCoreCommand
                 );
 
         if (runtime.isEmpty()) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Runtime not loaded."
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Runtime not loaded."
             );
 
             return true;
@@ -446,9 +460,10 @@ public final class TasticCoreCommand
                     settingId
             );
         } catch (IllegalArgumentException exception) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Unknown setting: "
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Unknown setting: "
                             + settingId
             );
 
@@ -468,26 +483,29 @@ public final class TasticCoreCommand
                     parsedValue
             );
 
-            sender.sendMessage(
-                    ChatColor.GREEN
-                            + "Updated "
+            sendColored(
+                    sender,
+                    NamedTextColor.GREEN,
+                    "Updated "
                             + key.id()
                             + " = "
                             + parsedValue
             );
 
-            sender.sendMessage(
-                    ChatColor.GRAY
-                            + "Settings dirty: "
+            sendColored(
+                    sender,
+                    NamedTextColor.GRAY,
+                    "Settings dirty: "
                             + runtime.get()
                             .settings()
                             .dirty()
             );
 
         } catch (IllegalArgumentException exception) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + exception.getMessage()
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    exception.getMessage()
             );
         }
 
@@ -499,18 +517,20 @@ public final class TasticCoreCommand
             String[] args
     ) {
         if (args.length != 1) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Usage: /tasticcore status"
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Usage: /tasticcore status"
             );
 
             return true;
         }
 
-        sender.sendMessage("");
-        sender.sendMessage(
-                ChatColor.GOLD
-                        + "=== TasticCore Status ==="
+        sendBlank(sender);
+        sendColored(
+                sender,
+                NamedTextColor.GOLD,
+                "=== TasticCore Status ==="
         );
 
         sendValue(
@@ -565,7 +585,7 @@ public final class TasticCoreCommand
                 unloadingPlayers
         );
 
-        sender.sendMessage("");
+        sendBlank(sender);
 
         return true;
     }
@@ -575,9 +595,10 @@ public final class TasticCoreCommand
             String[] args
     ) {
         if (args.length != 2) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Usage: /tasticcore settings <player>"
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Usage: /tasticcore settings <player>"
             );
 
             return true;
@@ -587,9 +608,10 @@ public final class TasticCoreCommand
                 Bukkit.getPlayerExact(args[1]);
 
         if (player == null) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Player not online."
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Player not online."
             );
 
             return true;
@@ -601,9 +623,10 @@ public final class TasticCoreCommand
                 );
 
         if (runtime.isEmpty()) {
-            sender.sendMessage(
-                    ChatColor.RED
-                            + "Runtime not loaded."
+            sendColored(
+                    sender,
+                    NamedTextColor.RED,
+                    "Runtime not loaded."
             );
 
             return true;
@@ -617,10 +640,11 @@ public final class TasticCoreCommand
                         tasticPlayer
                 );
 
-        sender.sendMessage("");
-        sender.sendMessage(
-                ChatColor.GOLD
-                        + "=== Settings: "
+        sendBlank(sender);
+        sendColored(
+                sender,
+                NamedTextColor.GOLD,
+                "=== Settings: "
                         + tasticPlayer.username()
                         + " ==="
         );
@@ -632,16 +656,29 @@ public final class TasticCoreCommand
                 )
                 .forEach(entry ->
                         sender.sendMessage(
-                                ChatColor.YELLOW
-                                        + entry.getKey()
-                                        + ChatColor.GRAY
-                                        + " = "
-                                        + ChatColor.WHITE
-                                        + entry.getValue()
+                                Component.text(
+                                                entry.getKey(),
+                                                NamedTextColor.YELLOW
+                                        )
+                                        .append(
+                                                Component.text(
+                                                        " = ",
+                                                        NamedTextColor.GRAY
+                                                )
+                                        )
+                                        .append(
+                                                Component.text(
+                                                        String.valueOf(
+                                                                entry.getValue()
+                                                        ),
+                                                        NamedTextColor.WHITE
+                                                )
+                                        )
                         )
                 );
 
-        sender.sendMessage("");
+        sendBlank(sender);
+
         sendValue(
                 sender,
                 "Dirty",
@@ -654,7 +691,7 @@ public final class TasticCoreCommand
                 settingRegistry.size()
         );
 
-        sender.sendMessage("");
+        sendBlank(sender);
 
         return true;
     }
@@ -740,50 +777,83 @@ public final class TasticCoreCommand
             Object value
     ) {
         sender.sendMessage(
-                ChatColor.YELLOW
-                        + name
-                        + ": "
-                        + ChatColor.WHITE
-                        + String.valueOf(value)
+                Component.text(
+                                name + ": ",
+                                NamedTextColor.YELLOW
+                        )
+                        .append(
+                                Component.text(
+                                        String.valueOf(value),
+                                        NamedTextColor.WHITE
+                                )
+                        )
+        );
+    }
+
+    private void sendColored(
+            CommandSender sender,
+            NamedTextColor color,
+            String message
+    ) {
+        sender.sendMessage(
+                Component.text(
+                        String.valueOf(message),
+                        color
+                )
+        );
+    }
+
+    private void sendBlank(
+            CommandSender sender
+    ) {
+        sender.sendMessage(
+                Component.empty()
         );
     }
 
     private void sendUsage(
             CommandSender sender
     ) {
-        sender.sendMessage("");
-        sender.sendMessage(
-                ChatColor.GOLD
-                        + "=== TasticCore Commands ==="
+        sendBlank(sender);
+
+        sendColored(
+                sender,
+                NamedTextColor.GOLD,
+                "=== TasticCore Commands ==="
         );
 
-        sender.sendMessage(
-                ChatColor.YELLOW
-                        + "/tasticcore player <name>"
+        sendColored(
+                sender,
+                NamedTextColor.YELLOW,
+                "/tasticcore player <name>"
         );
 
-        sender.sendMessage(
-                ChatColor.YELLOW
-                        + "/tasticcore settings <name>"
+        sendColored(
+                sender,
+                NamedTextColor.YELLOW,
+                "/tasticcore settings <name>"
         );
 
-        sender.sendMessage(
-                ChatColor.YELLOW
-                        + "/tasticcore flush <name>"
+        sendColored(
+                sender,
+                NamedTextColor.YELLOW,
+                "/tasticcore flush <name>"
         );
 
-        sender.sendMessage(
-                ChatColor.YELLOW
-                        + "/tasticcore status"
+        sendColored(
+                sender,
+                NamedTextColor.YELLOW,
+                "/tasticcore status"
         );
 
-        sender.sendMessage(
-                ChatColor.YELLOW
-                        + "/tasticcore setting "
+        sendColored(
+                sender,
+                NamedTextColor.YELLOW,
+                "/tasticcore setting "
                         + "<name> <setting> <value>"
         );
 
-        sender.sendMessage("");
+        sendBlank(sender);
     }
 
     private String formatDuration(
